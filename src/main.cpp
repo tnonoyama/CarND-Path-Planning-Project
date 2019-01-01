@@ -205,9 +205,9 @@ int main() {
   int lane = 1;
 
   // Have a reference velocity to target
-  double ref_vel = 49.5; //mph
+  double ref_vel = 0.0; //mph
 
-  h.onMessage([&](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  h.onMessage([&ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy,&lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -244,6 +244,110 @@ int main() {
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
 		int prev_size = previous_path_x.size();
+
+		if(prev_size > 0)
+		{
+		  car_s = end_path_s;
+		}
+
+//		bool too_close = false;
+		
+		// Prediction : Analysing other cars positions.
+		bool car_ahead = false;
+                bool car_left = false;
+                bool car_righ = false;
+
+		//find ref_v to use
+		for(int i = 0; i < sensor_fusion.size(); i++)
+		{
+		  //car is in my lane
+		  float d = sensor_fusion[i][6];
+		  int car_lane = -1;
+		  // is it the same lane we are
+		  if(d > 0 && d < 4 ){
+		    car_lane = 0;
+                } else if ( d > 4 && d < 8 ) {
+                  car_lane = 1;
+                } else if ( d > 8 && d < 12 ) {
+                  car_lane = 2;
+                }
+                if (car_lane < 0) {
+                  continue;
+                }
+//		  if(d < (2+4*lane+2) && d > (2+4*lane-2))
+//		  {
+		// Find car speed.
+		double vx = sensor_fusion[i][3];
+		double vy = sensor_fusion[i][4];
+		double check_speed = sqrt(vx*vx+vy*vy);	
+	    	double check_car_s = sensor_fusion[i][5];
+
+		check_car_s+=((double)prev_size*.02*check_speed); //if using previous points can project s value out
+		if ( car_lane == lane ) {
+                  // Car in our lane.
+                  car_ahead |= check_car_s > car_s && check_car_s - car_s < 30;
+                } else if ( car_lane - lane == -1 ) {
+                  // Car left
+                  car_left |= car_s - 30 < check_car_s && car_s + 30 > check_car_s;
+                } else if ( car_lane - lane == 1 ) {
+                  // Car right
+                  car_righ |= car_s - 30 < check_car_s && car_s + 30 > check_car_s;
+                }
+//		//check s values greater than mine and s gap
+//		    if((check_car_s > car_s) && ((check_car_s-car_s) < 30) )
+//		    {
+
+			// Do some logic here, lower rederence velocity so we coont crash into the car infront of us, could
+			// also flag to try to change lanes
+			//ref_vel = 29.5; //mph
+//			too_close = true;
+//			if(lane > 0)
+//			{
+//			  lane = 0;
+//			}
+//
+//
+//		    }
+//
+//		  }
+		}
+
+		// Behavior : Let's see what to do.
+
+    		double speed_diff = 0;
+		const double MAX_SPEED = 49.5;
+    		const double MAX_ACC = .224;
+    		if ( car_ahead ){ // Car ahead
+	  	  if ( !car_left && lane > 0 ) {
+                  // if there is no car left and there is a left lane.
+                  lane--; // Change lane left.
+              	  } else if ( !car_righ && lane != 2 ){
+                  // if there is no car right and there is a right lane.
+                  lane++; // Change lane right.
+              	  } else {
+//                    speed_diff -= MAX_ACC;
+		    ref_vel -= MAX_ACC;
+                  }
+                } else {
+                  if ( lane != 1 ) { // if we are not on the center lane.
+                    if ( ( lane == 0 && !car_righ ) || ( lane == 2 && !car_left ) ) {
+                    lane = 1; // Back to center.
+                  }
+                }
+                if ( ref_vel < MAX_SPEED ) {
+//                  speed_diff += MAX_ACC;
+		  ref_vel += MAX_ACC;
+                }
+              }
+//		if(too_close)
+//		{
+//		  ref_vel -= .224;
+//		}
+//		else if(ref_vel < 49.5)
+//		{
+//		  ref_vel += .224;
+//		}
+
 
 		// Create a list of widely spaced (x,y) waypoints, evenly spaces at 30m
 		// later we will interpolate these waypoints with a spline and fill it in with more points that control speed.
@@ -301,9 +405,9 @@ int main() {
 		ptsx.push_back(next_wp1[0]);
 		ptsx.push_back(next_wp2[0]);
 
-		ptsy.push_back(next_wp0[0]);
-                ptsy.push_back(next_wp1[0]);
-                ptsy.push_back(next_wp2[0]);
+		ptsy.push_back(next_wp0[1]);
+                ptsy.push_back(next_wp1[1]);
+                ptsy.push_back(next_wp2[1]);
 
 		for(int i = 0; i < ptsx.size(); i++)
 		{
@@ -370,15 +474,15 @@ int main() {
 
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-		double dist_inc = 0.5;
-		for(int i = 0; i < 50; i++)
-		{
-		  double next_s = car_s+(i+1)*dist_inc;
-	  	  double next_d = 6;
-		  vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-		  next_x_vals.push_back(xy[0]);
-		  next_y_vals.push_back(xy[1]);
-		}
+//		double dist_inc = 0.5;
+//		for(int i = 0; i < 50; i++)
+//		{
+//		  double next_s = car_s+(i+1)*dist_inc;
+//	  	  double next_d = 6;
+//		  vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+//		  next_x_vals.push_back(xy[0]);
+//		  next_y_vals.push_back(xy[1]);
+//		}
 		json msgJson;
           	msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
